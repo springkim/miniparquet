@@ -5,6 +5,7 @@
 #include <math.h>
 
 #include "snappy/snappy.h"
+#include "zstd/lib/zstd.h"
 
 #include "miniparquet.h"
 
@@ -871,9 +872,37 @@ void ParquetFile::scan_column(ScanState &state, ResultColumn &result_col) {
 
 			break;
 		}
+		case CompressionCodec::ZSTD: {
+			size_t decompressed_size = ZSTD_getFrameContentSize(chunk_buf.ptr, 
+					cs.page_header.compressed_page_size);
+			if (decompressed_size == ZSTD_CONTENTSIZE_ERROR) {
+				throw runtime_error("ZSTD: Not a valid zstd compressed buffer");
+			}
+			if (decompressed_size == ZSTD_CONTENTSIZE_UNKNOWN) {
+				throw runtime_error("ZSTD: Content size unknown");
+			}
+			
+			decompressed_buf.resize(decompressed_size + 1);
+			
+			size_t zstd_result = ZSTD_decompress(
+				decompressed_buf.ptr, 
+				decompressed_size,
+				chunk_buf.ptr, 
+				cs.page_header.compressed_page_size);
+				
+			if (ZSTD_isError(zstd_result)) {
+				throw runtime_error(std::string("ZSTD decompression failure: ") + 
+					ZSTD_getErrorName(zstd_result));
+			}
+			
+			cs.page_buf_ptr = (char*) decompressed_buf.ptr;
+			cs.page_buf_len = cs.page_header.uncompressed_page_size;
+			
+			break;
+		}
 		default:
 			throw runtime_error(
-					"Unsupported compression codec. Try uncompressed or snappy");
+					"Unsupported compression codec. Try uncompressed, snappy, or zstd");
 		}
 
 		cs.page_buf_end_ptr = cs.page_buf_ptr + cs.page_buf_len;
