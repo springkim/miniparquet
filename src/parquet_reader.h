@@ -63,6 +63,12 @@ namespace miniparquet {
       return snappy::RawUncompress(compressed, n, uncompressed);
     }
     
+    // Overload that takes a known uncompressed length
+    inline bool RawUncompress(const char* compressed, size_t compressed_length, 
+                             char* uncompressed, size_t uncompressed_length) {
+      return snappy::RawUncompress(compressed, compressed_length, uncompressed, uncompressed_length);
+    }
+    
     // flat 스키마 리스트를 재귀적으로 트리로 구성 (정확한 자식 수를 이용)
     size_t build_schema_tree(const std::vector<SchemaElement>& flat, size_t index, uint32_t num_children, ParquetFieldData& parent);
   }
@@ -343,9 +349,20 @@ namespace miniparquet {
 
     // flat 스키마 리스트(flat)에서 현재 요소부터 num_children 만큼을 재귀적으로 읽어 parent.children에 추가.
     inline size_t build_schema_tree(const std::vector<SchemaElement>& flat, size_t index, uint32_t num_children, ParquetFieldData& parent) {
-      for (uint32_t i = 0; i < num_children; i++) {
-        if (index >= flat.size())
-          throw std::runtime_error("Insufficient schema elements");
+      // Safety check for empty schema
+      if (flat.empty()) {
+        throw std::runtime_error("Empty schema elements list");
+      }
+      
+      // Limit num_children to avoid out-of-bounds access
+      uint32_t safe_num_children = std::min(num_children, static_cast<uint32_t>(flat.size() - index));
+      
+      for (uint32_t i = 0; i < safe_num_children; i++) {
+        if (index >= flat.size()) {
+          // Instead of throwing, we'll stop processing and return the current index
+          return index;
+        }
+        
         const SchemaElement& se = flat[index++];
         ParquetFieldData child;
         child.name = se.name;
@@ -355,11 +372,17 @@ namespace miniparquet {
         // (max_def_level, max_rep_level은 실제 데이터 페이지 재구성 시 결정)
         child.max_def_level = 0;
         child.max_rep_level = 0;
-        if (se.num_children > 0) {
-          index = build_schema_tree(flat, index, se.num_children, child);
+        
+        // Safely process children if any
+        if (se.num_children > 0 && index < flat.size()) {
+          // Limit the number of children to process to avoid out-of-bounds access
+          uint32_t safe_se_children = std::min(se.num_children, static_cast<uint32_t>(flat.size() - index));
+          index = build_schema_tree(flat, index, safe_se_children, child);
         }
+        
         parent.children.push_back(child);
       }
+      
       return index;
     }
   } // namespace internal

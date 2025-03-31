@@ -16,6 +16,7 @@ static const int kBlockLog = 16;
 static const size_t kBlockSize = 1 << kBlockLog;
 static const int kMaxHashTableBits = 14;
 static const size_t kMaxHashTableSize = 1 << kMaxHashTableBits;
+static const int kMaximumTagLength = 5;  // Maximum length of a tag (copy with 4-byte offset)
 
 // Mapping from i in range [0,4] to a mask to extract the bottom 8*i bits
 static const uint32_t wordmask[] = {
@@ -34,6 +35,70 @@ enum {
   COPY_1_BYTE_OFFSET = 1,  // 3 bit length + 3 bits of offset in opcode
   COPY_2_BYTE_OFFSET = 2,
   COPY_4_BYTE_OFFSET = 3
+};
+
+// Varint utility functions for handling variable-length encoded integers
+class Varint {
+public:
+  // Maximum lengths of varint encoding of uint32_t.
+  static const int kMax32 = 5;
+
+  // Attempts to parse a varint32 from a prefix of the bytes in [ptr,limit-1].
+  // Never reads a character at or beyond limit. If a valid/terminated varint32
+  // was found in the range, stores it in *OUTPUT and returns a pointer just
+  // past the last byte of the varint32. Else returns NULL.
+  static inline const char* Parse32WithLimit(const char* p,
+                                           const char* l,
+                                           uint32_t* OUTPUT) {
+    const unsigned char* ptr = reinterpret_cast<const unsigned char*>(p);
+    const unsigned char* limit = reinterpret_cast<const unsigned char*>(l);
+    uint32_t b, result;
+    if (ptr >= limit) return NULL;
+    b = *(ptr++); result = b & 127;          if (b < 128) goto done;
+    if (ptr >= limit) return NULL;
+    b = *(ptr++); result |= (b & 127) <<  7; if (b < 128) goto done;
+    if (ptr >= limit) return NULL;
+    b = *(ptr++); result |= (b & 127) << 14; if (b < 128) goto done;
+    if (ptr >= limit) return NULL;
+    b = *(ptr++); result |= (b & 127) << 21; if (b < 128) goto done;
+    if (ptr >= limit) return NULL;
+    b = *(ptr++); result |= (b & 127) << 28; if (b < 16) goto done;
+    return NULL;       // Value is too long to be a varint32
+   done:
+    *OUTPUT = result;
+    return reinterpret_cast<const char*>(ptr);
+  }
+
+  // REQUIRES   "ptr" points to a buffer of length sufficient to hold "v".
+  // EFFECTS    Encodes "v" into "ptr" and returns a pointer to the
+  //            byte just past the last encoded byte.
+  static inline char* Encode32(char* sptr, uint32_t v) {
+    // Operate on characters as unsigneds
+    unsigned char* ptr = reinterpret_cast<unsigned char*>(sptr);
+    static const int B = 128;
+    if (v < (1<<7)) {
+      *(ptr++) = v;
+    } else if (v < (1<<14)) {
+      *(ptr++) = v | B;
+      *(ptr++) = v>>7;
+    } else if (v < (1<<21)) {
+      *(ptr++) = v | B;
+      *(ptr++) = (v>>7) | B;
+      *(ptr++) = v>>14;
+    } else if (v < (1<<28)) {
+      *(ptr++) = v | B;
+      *(ptr++) = (v>>7) | B;
+      *(ptr++) = (v>>14) | B;
+      *(ptr++) = v>>21;
+    } else {
+      *(ptr++) = v | B;
+      *(ptr++) = (v>>7) | B;
+      *(ptr++) = (v>>14) | B;
+      *(ptr++) = (v>>21) | B;
+      *(ptr++) = v>>28;
+    }
+    return reinterpret_cast<char*>(ptr);
+  }
 };
 
 // Copy "len" bytes from "src" to "op", one byte at a time.  Used for

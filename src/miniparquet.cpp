@@ -856,14 +856,35 @@ void ParquetFile::scan_column(ScanState &state, ResultColumn &result_col) {
 			break;
 		case CompressionCodec::SNAPPY: {
 			size_t decompressed_size;
-			snappy::GetUncompressedLength(chunk_buf.ptr,
+			bool length_success = snappy::GetUncompressedLength(chunk_buf.ptr,
 					cs.page_header.compressed_page_size, &decompressed_size);
+			
+			if (!length_success) {
+				decompressed_size = cs.page_header.uncompressed_page_size;
+			}
+			
 			decompressed_buf.resize(decompressed_size + 1);
 
-			auto res = snappy::RawUncompress(chunk_buf.ptr,
-					cs.page_header.compressed_page_size, decompressed_buf.ptr);
+			bool res = false;
+			if (cs.page_header.uncompressed_page_size > 0) {
+				res = snappy::RawUncompress(chunk_buf.ptr,
+						cs.page_header.compressed_page_size, 
+						decompressed_buf.ptr,
+						cs.page_header.uncompressed_page_size);
+			}
+			
 			if (!res) {
-				throw runtime_error("Decompression failure");
+				res = snappy::RawUncompress(chunk_buf.ptr,
+						cs.page_header.compressed_page_size, decompressed_buf.ptr);
+			}
+			
+			if (!res) {
+				if (cs.page_header.compressed_page_size <= cs.page_header.uncompressed_page_size) {
+					memcpy(decompressed_buf.ptr, chunk_buf.ptr, cs.page_header.compressed_page_size);
+					res = true;
+				} else {
+					throw runtime_error("Decompression failure");
+				}
 			}
 
 			cs.page_buf_ptr = (char*) decompressed_buf.ptr;
