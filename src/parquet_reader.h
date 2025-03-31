@@ -9,7 +9,6 @@
 #include <stdexcept>
 #include <cstring>
 #include <memory>
-#include "snappy_common.h"
 #include "snappy_decompression.h"
 
 namespace miniparquet {
