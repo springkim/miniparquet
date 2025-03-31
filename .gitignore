@@ -11,3 +11,4 @@ pqtest
 .project
 .settings
 *.tar.gz
+test_parquet_reader
