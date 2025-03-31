@@ -9,7 +9,8 @@
 #include <stdexcept>
 #include <cstring>
 #include <memory>
-#include "snappy/snappy.h" // Include the actual Snappy library
+#include "snappy_common.h"
+#include "snappy_decompression.h"
 
 namespace miniparquet {
 
@@ -53,7 +54,7 @@ namespace miniparquet {
     int64_t readVarInt64(const uint8_t*& p, const uint8_t* end);
     void skipValue(uint8_t type, const uint8_t*& p, const uint8_t* end);
     
-    // Use Snappy library functions instead of custom implementations
+    // Use the header-only Snappy implementation
     inline bool GetUncompressedLength(const char* ptr, size_t n, size_t* result) {
       return snappy::GetUncompressedLength(ptr, n, result);
     }
